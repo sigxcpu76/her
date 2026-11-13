@@ -35,6 +35,15 @@ Prebuilt binaries and Linux `.AppImage` packages are available on the [Releases]
 sudo apt-get install pkg-config libasound2-dev libfontconfig1-dev libfreetype-dev \
   libdbus-1-dev libgl-dev libegl-dev libxkbcommon-dev libxkbcommon-x11-dev \
   libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+
+# Arch Linux
+sudo pacman -S pkgconf alsa-lib fontconfig freetype2 dbus libglvnd \
+  libxkbcommon libxkbcommon-x11 wayland libx11 libxcursor libxi libxrandr
+
+# Fedora
+sudo dnf install pkgconf-pkg-config alsa-lib-devel fontconfig-devel freetype-devel \
+  dbus-devel mesa-libGL-devel mesa-libEGL-devel libxkbcommon-devel libxkbcommon-x11-devel \
+  wayland-devel libX11-devel libXcursor-devel libXi-devel libXrandr-devel
 ```
 
 ### Build & Run

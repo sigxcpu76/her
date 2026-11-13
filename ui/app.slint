@@ -1,0 +1,621 @@
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export struct HistoryItem {
+    uri: string,
+    meta: string,
+}
+
+component TnButton inherits Rectangle {
+    in property <string> label;
+    in property <color> bg: #292e42;
+    in property <color> bg-hover: #343b58;
+    in property <color> fg: #c0caf5;
+    in property <length> pad-x: 16px;
+    in property <length> pad-y: 9px;
+    callback clicked;
+
+    min-width: txt.preferred-width + pad-x * 2;
+    min-height: txt.preferred-height + pad-y * 2;
+    preferred-height: txt.preferred-height + pad-y * 2;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    background: touch.has-hover ? bg-hover : bg;
+    border-width: 1px;
+    border-color: #414868;
+
+    txt := Text {
+        text: root.label;
+        color: root.fg;
+        font-size: 14px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component TnCard inherits Rectangle {
+    background: #24283b;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: #414868;
+    vertical-stretch: 0;
+}
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in-out property <string> value;
+    in property <string> placeholder: "";
+    in property <bool> is-password: false;
+    spacing: 10px;
+    height: 34px;
+    vertical-stretch: 0;
+    alignment: stretch;
+
+    Text {
+        text: root.label;
+        color: #a9b1d6;
+        font-size: 13px;
+        width: 190px;
+        vertical-alignment: center;
+    }
+
+    LineEdit {
+        text <=> root.value;
+        placeholder-text: root.placeholder;
+        input-type: root.is-password ? InputType.password : InputType.text;
+        horizontal-stretch: 1;
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Her";
+    preferred-width: 740px;
+    preferred-height: 600px;
+    min-width: 600px;
+    min-height: 460px;
+    background: #1a1b26;
+
+    // Navigation & status
+    in-out property <bool> show-settings: false;
+    in-out property <string> reg-label: "Direct SIP (No Reg)";
+    in-out property <color> reg-color: #a9b1d6;
+    in-out property <string> nat-label: "NAT: Discovering...";
+    in-out property <string> status-banner: "";
+
+    // Dialer state
+    in-out property <string> url-input: "";
+    in-out property <bool> show-history: false;
+    in-out property <[HistoryItem]> history-items: [];
+
+    // Call state: "idle" | "dialing" | "ringing-out" | "ringing-in" | "active"
+    in-out property <string> call-state: "idle";
+    in-out property <string> call-peer: "";
+    in-out property <string> call-display: "";
+    in-out property <string> call-codec: "";
+    in-out property <string> call-timer: "00:00";
+    in-out property <bool> call-muted: false;
+    in-out property <bool> call-hold: false;
+    in-out property <string> dtmf-sent: "";
+
+    // Settings - Registration
+    in-out property <bool> cfg-reg-enabled: false;
+    in-out property <string> cfg-reg-domain: "";
+    in-out property <string> cfg-reg-registrar: "";
+    in-out property <string> cfg-reg-username: "";
+    in-out property <string> cfg-reg-auth-username: "";
+    in-out property <string> cfg-reg-password: "";
+    in-out property <string> cfg-reg-display-name: "Her";
+    in-out property <string> cfg-reg-outbound-proxy: "";
+
+    // Settings - NAT
+    in-out property <bool> cfg-stun-enabled: true;
+    in-out property <string> cfg-stun-server: "stun.l.google.com:19302";
+    in-out property <string> cfg-stun-fallback: "stun1.l.google.com:19302";
+    in-out property <string> stun-test-status: "";
+    in-out property <bool> cfg-use-rport: true;
+    in-out property <bool> cfg-symmetric-rtp: true;
+    in-out property <string> cfg-keepalive: "25";
+
+    // Settings - Codecs & Audio
+    in-out property <bool> cfg-g722: true;
+    in-out property <bool> cfg-pcmu: true;
+    in-out property <bool> cfg-pcma: true;
+    in-out property <bool> cfg-g729: true;
+    in-out property <[string]> dtmf-modes: ["RFC 4733 (RTP Event)", "SIP INFO", "Both (RFC 4733 + SIP INFO)"];
+    in-out property <int> cfg-dtmf-index: 0;
+    in-out property <[string]> input-devices: ["System Default"];
+    in-out property <int> cfg-input-index: 0;
+    in-out property <[string]> output-devices: ["System Default"];
+    in-out property <int> cfg-output-index: 0;
+    in-out property <string> cfg-local-port: "0";
+
+    // Callbacks
+    callback dial(string);
+    callback hangup();
+    callback answer();
+    callback decline();
+    callback toggle-mute();
+    callback toggle-hold();
+    callback send-dtmf(string);
+    callback toggle-history();
+    callback select-history(string);
+    callback clear-history();
+    callback open-settings();
+    callback close-settings();
+    callback register-now();
+    callback unregister-now();
+    callback test-stun();
+    callback save-settings();
+
+    public function focus-dtmf() {
+        dtmf-scope.focus();
+    }
+
+    dtmf-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+
+        key-pressed(event) => {
+            if (!root.show-settings && root.call-state == "active") {
+                if (event.text == "0" || event.text == "1" || event.text == "2" || event.text == "3"
+                    || event.text == "4" || event.text == "5" || event.text == "6" || event.text == "7"
+                    || event.text == "8" || event.text == "9" || event.text == "*" || event.text == "#"
+                    || event.text == "a" || event.text == "b" || event.text == "c" || event.text == "d"
+                    || event.text == "A" || event.text == "B" || event.text == "C" || event.text == "D") {
+                    root.send-dtmf(event.text);
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 18px;
+            spacing: 14px;
+
+            // Header
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: space-between;
+                vertical-stretch: 0;
+
+                VerticalLayout {
+                    spacing: 3px;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        text: "Her";
+                        color: #7aa2f7;
+                        font-size: 22px;
+                        font-weight: 700;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.reg-label;
+                            color: root.reg-color;
+                            font-size: 12px;
+                        }
+                        Text {
+                            text: "•";
+                            color: #565f89;
+                            font-size: 12px;
+                        }
+                        Text {
+                            text: root.nat-label;
+                            color: #a9b1d6;
+                            font-size: 12px;
+                        }
+                    }
+                }
+
+                TnButton {
+                    label: root.show-settings ? "Back" : "Settings";
+                    bg: #292e42;
+                    bg-hover: #3b4261;
+                    clicked => {
+                        if (root.show-settings) {
+                            root.close-settings();
+                        } else {
+                            root.open-settings();
+                        }
+                    }
+                }
+            }
+
+            // Dialer Page
+            if !root.show-settings: VerticalLayout {
+                spacing: 14px;
+                vertical-stretch: 1;
+
+                // Single SIP URL + History Input Box
+                HorizontalLayout {
+                    spacing: 8px;
+                    height: 38px;
+                    vertical-stretch: 0;
+
+                    url-edit := LineEdit {
+                        text <=> root.url-input;
+                        placeholder-text: "Enter SIP URL (e.g. sip:echo@iptel.org)...";
+                        font-size: 14px;
+                        horizontal-stretch: 1;
+                        accepted => {
+                            if (root.call-state == "idle") {
+                                root.dial(root.url-input);
+                            }
+                        }
+                    }
+
+                    TnButton {
+                        label: root.show-history ? "Hide" : "History";
+                        clicked => { root.toggle-history(); }
+                    }
+
+                    if root.call-state == "idle": TnButton {
+                        label: "Call";
+                        bg: #9ece6a;
+                        bg-hover: #b2df7f;
+                        fg: #1a1b26;
+                        pad-x: 22px;
+                        clicked => { root.dial(root.url-input); }
+                    }
+
+                    if root.call-state != "idle": TnButton {
+                        label: "Hangup";
+                        bg: #f7768e;
+                        bg-hover: #ff8fa3;
+                        fg: #1a1b26;
+                        pad-x: 20px;
+                        clicked => { root.hangup(); }
+                    }
+                }
+
+                // History Dropdown
+                if root.show-history: TnCard {
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+
+                        if root.history-items.length == 0: Text {
+                            text: "No recent calls";
+                            color: #565f89;
+                            font-size: 13px;
+                        }
+
+                        for item in root.history-items: HorizontalLayout {
+                            spacing: 8px;
+                            TnButton {
+                                label: item.uri + (item.meta != "" ? "  (" + item.meta + ")" : "");
+                                horizontal-stretch: 1;
+                                bg: #1f2335;
+                                bg-hover: #292e42;
+                                clicked => { root.select-history(item.uri); }
+                            }
+                            TnButton {
+                                label: "Call";
+                                bg: #9ece6a;
+                                bg-hover: #b2df7f;
+                                fg: #1a1b26;
+                                pad-x: 14px;
+                                pad-y: 6px;
+                                clicked => { root.dial(item.uri); }
+                            }
+                        }
+
+                        if root.history-items.length > 0: HorizontalLayout {
+                            alignment: end;
+                            TnButton {
+                                label: "Clear History";
+                                pad-x: 12px;
+                                pad-y: 5px;
+                                clicked => { root.clear-history(); }
+                            }
+                        }
+                    }
+                }
+
+                // Call State Card (NO on-screen keypad!)
+                TnCard {
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 10px;
+
+                        if root.call-state == "idle": VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "Ready";
+                                color: #c0caf5;
+                                font-size: 16px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: "Enter a SIP URL above and press Enter or Call. No registration required.";
+                                color: #a9b1d6;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if root.call-state == "dialing": VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "Dialing...";
+                                color: #e0af68;
+                                font-size: 16px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: root.call-peer;
+                                color: #c0caf5;
+                                font-size: 14px;
+                            }
+                        }
+
+                        if root.call-state == "ringing-out": VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "Ringing...";
+                                color: #7dcfff;
+                                font-size: 16px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: root.call-peer;
+                                color: #c0caf5;
+                                font-size: 14px;
+                            }
+                        }
+
+                        if root.call-state == "ringing-in": VerticalLayout {
+                            spacing: 10px;
+                            Text {
+                                text: "Incoming Call";
+                                color: #9ece6a;
+                                font-size: 16px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: root.call-display + " (" + root.call-peer + ")";
+                                color: #c0caf5;
+                                font-size: 14px;
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+                                TnButton {
+                                    label: "Answer";
+                                    bg: #9ece6a;
+                                    bg-hover: #b2df7f;
+                                    fg: #1a1b26;
+                                    clicked => { root.answer(); }
+                                }
+                                TnButton {
+                                    label: "Decline";
+                                    bg: #f7768e;
+                                    bg-hover: #ff8fa3;
+                                    fg: #1a1b26;
+                                    clicked => { root.decline(); }
+                                }
+                            }
+                        }
+
+                        if root.call-state == "active": VerticalLayout {
+                            spacing: 10px;
+                            HorizontalLayout {
+                                alignment: space-between;
+                                Text {
+                                    text: "Connected";
+                                    color: #9ece6a;
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                }
+                                Text {
+                                    text: root.call-timer;
+                                    color: #7dcfff;
+                                    font-size: 16px;
+                                    font-weight: 600;
+                                }
+                            }
+                            Text {
+                                text: root.call-peer;
+                                color: #c0caf5;
+                                font-size: 14px;
+                            }
+                            Text {
+                                text: "Codec: " + root.call-codec;
+                                color: #a9b1d6;
+                                font-size: 12px;
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+                                TnButton {
+                                    label: root.call-muted ? "Unmute" : "Mute";
+                                    bg: root.call-muted ? #7aa2f7 : #292e42;
+                                    fg: root.call-muted ? #1a1b26 : #c0caf5;
+                                    clicked => { root.toggle-mute(); }
+                                }
+                                TnButton {
+                                    label: root.call-hold ? "Resume" : "Hold";
+                                    bg: root.call-hold ? #7aa2f7 : #292e42;
+                                    fg: root.call-hold ? #1a1b26 : #c0caf5;
+                                    clicked => { root.toggle-hold(); }
+                                }
+                                TnButton {
+                                    label: "Hangup";
+                                    bg: #f7768e;
+                                    bg-hover: #ff8fa3;
+                                    fg: #1a1b26;
+                                    clicked => { root.hangup(); }
+                                }
+                            }
+                            Text {
+                                text: root.dtmf-sent == ""
+                                    ? "Type 0-9, *, #, A-D on your keyboard to send DTMF"
+                                    : "DTMF sent: " + root.dtmf-sent;
+                                color: #7aa2f7;
+                                font-size: 12px;
+                            }
+                        }
+                    }
+                }
+
+                if root.status-banner != "": Text {
+                    text: root.status-banner;
+                    color: #e0af68;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+
+            // Settings Page
+            if root.show-settings: ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    spacing: 12px;
+                    padding-right: 10px;
+
+                    // Registration
+                    TnCard {
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 8px;
+                            Text { text: "SIP Registration (Optional)"; color: #7aa2f7; font-size: 15px; font-weight: 600; }
+                            CheckBox { text: "Enable SIP Registration"; checked <=> root.cfg-reg-enabled; }
+                            SettingRow { label: "SIP Domain"; value <=> root.cfg-reg-domain; placeholder: "example.com"; }
+                            SettingRow { label: "Registrar (optional)"; value <=> root.cfg-reg-registrar; placeholder: "sip.example.com:5060"; }
+                            SettingRow { label: "Username"; value <=> root.cfg-reg-username; placeholder: "alice"; }
+                            SettingRow { label: "Auth Username (optional)"; value <=> root.cfg-reg-auth-username; placeholder: "alice"; }
+                            SettingRow { label: "Password"; value <=> root.cfg-reg-password; placeholder: "••••••••"; is-password: true; }
+                            SettingRow { label: "Display Name"; value <=> root.cfg-reg-display-name; placeholder: "Her"; }
+                            SettingRow { label: "Outbound Proxy (optional)"; value <=> root.cfg-reg-outbound-proxy; placeholder: "proxy.example.com:5060"; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+                                TnButton {
+                                    label: "Register";
+                                    bg: #7aa2f7;
+                                    bg-hover: #89b4fa;
+                                    fg: #1a1b26;
+                                    clicked => { root.register-now(); }
+                                }
+                                TnButton {
+                                    label: "Unregister";
+                                    clicked => { root.unregister-now(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // NAT & STUN
+                    TnCard {
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 8px;
+                            Text { text: "NAT Traversal & STUN"; color: #7aa2f7; font-size: 15px; font-weight: 600; }
+                            CheckBox { text: "Enable STUN (Google STUN by default)"; checked <=> root.cfg-stun-enabled; }
+                            SettingRow { label: "Primary STUN Server"; value <=> root.cfg-stun-server; placeholder: "stun.l.google.com:19302"; }
+                            SettingRow { label: "Fallback STUN Server"; value <=> root.cfg-stun-fallback; placeholder: "stun1.l.google.com:19302"; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
+                                TnButton {
+                                    label: "Test STUN";
+                                    bg: #7aa2f7;
+                                    bg-hover: #89b4fa;
+                                    fg: #1a1b26;
+                                    clicked => { root.test-stun(); }
+                                }
+                                Text {
+                                    text: root.stun-test-status;
+                                    color: #9ece6a;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            CheckBox { text: "Use SIP rport (RFC 3581)"; checked <=> root.cfg-use-rport; }
+                            CheckBox { text: "Symmetric RTP (latch NAT media port)"; checked <=> root.cfg-symmetric-rtp; }
+                            SettingRow { label: "NAT Keepalive (sec, 0=off)"; value <=> root.cfg-keepalive; placeholder: "25"; }
+                        }
+                    }
+
+                    // Codecs & DTMF
+                    TnCard {
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 8px;
+                            Text { text: "Codecs & DTMF"; color: #7aa2f7; font-size: 15px; font-weight: 600; }
+                            CheckBox { text: "G.722 (16kHz Wideband)"; checked <=> root.cfg-g722; }
+                            CheckBox { text: "PCMU (G.711 u-law, 8kHz)"; checked <=> root.cfg-pcmu; }
+                            CheckBox { text: "PCMA (G.711 A-law, 8kHz)"; checked <=> root.cfg-pcma; }
+                            CheckBox { text: "G.729 (8kbit/s CS-ACELP, pure Rust)"; checked <=> root.cfg-g729; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "DTMF Mode"; color: #a9b1d6; font-size: 13px; width: 190px; vertical-alignment: center; }
+                                ComboBox {
+                                    model: root.dtmf-modes;
+                                    current-index <=> root.cfg-dtmf-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+
+                    // Audio & Network
+                    TnCard {
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 8px;
+                            Text { text: "Audio & Network"; color: #7aa2f7; font-size: 15px; font-weight: 600; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "Input Device"; color: #a9b1d6; font-size: 13px; width: 190px; vertical-alignment: center; }
+                                ComboBox {
+                                    model: root.input-devices;
+                                    current-index <=> root.cfg-input-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "Output Device"; color: #a9b1d6; font-size: 13px; width: 190px; vertical-alignment: center; }
+                                ComboBox {
+                                    model: root.output-devices;
+                                    current-index <=> root.cfg-output-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            SettingRow { label: "Local SIP Port (0=auto)"; value <=> root.cfg-local-port; placeholder: "0"; }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: end;
+                        TnButton {
+                            label: "Cancel";
+                            clicked => { root.close-settings(); }
+                        }
+                        TnButton {
+                            label: "Save Settings";
+                            bg: #7aa2f7;
+                            bg-hover: #89b4fa;
+                            fg: #1a1b26;
+                            pad-x: 22px;
+                            clicked => { root.save-settings(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

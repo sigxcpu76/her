@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive: her-linux-amd64.tar.gz
+            appimage: her-linux-amd64.AppImage
+            appimage_arch: x86_64
+            bin: her-sip
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: her-linux-arm64.tar.gz
+            appimage: her-linux-arm64.AppImage
+            appimage_arch: aarch64
+            bin: her-sip
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            archive: her-macos-arm64.tar.gz
+            bin: her-sip
+          - name: windows-amd64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: her-windows-amd64.zip
+            bin: her-sip.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libasound2-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            file
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Run unit tests
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Unix archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/her"
+          chmod +x "dist/her"
+          tar -czf "${{ matrix.archive }}" -C dist her
+
+      - name: Package Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p Her.AppDir/usr/bin Her.AppDir/usr/share/applications Her.AppDir/usr/share/icons/hicolor/scalable/apps
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" Her.AppDir/usr/bin/her
+          chmod +x Her.AppDir/usr/bin/her
+
+          cat > Her.AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/her" "$@"
+          EOF
+          chmod +x Her.AppDir/AppRun
+
+          cat > Her.AppDir/her.desktop <<'EOF'
+          [Desktop Entry]
+          Name=Her
+          Comment=Lightweight SIP Phone
+          Exec=her
+          Icon=her
+          Type=Application
+          Categories=Network;Telephony;
+          EOF
+          cp Her.AppDir/her.desktop Her.AppDir/usr/share/applications/her.desktop
+
+          cat > Her.AppDir/her.svg <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+            <rect width="128" height="128" rx="24" fill="#1a1b26"/>
+            <rect x="6" y="6" width="116" height="116" rx="20" fill="#24283b" stroke="#414868" stroke-width="3"/>
+            <text x="64" y="84" text-anchor="middle" font-family="sans-serif" font-size="64" font-weight="bold" fill="#7aa2f7">H</text>
+          </svg>
+          EOF
+          cp Her.AppDir/her.svg Her.AppDir/usr/share/icons/hicolor/scalable/apps/her.svg
+
+          curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage"
+          chmod +x appimagetool
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH="${{ matrix.appimage_arch }}" ./appimagetool Her.AppDir "${{ matrix.appimage }}"
+
+      - name: Package Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/her.exe"
+          Compress-Archive -Path "dist/her.exe" -DestinationPath "${{ matrix.archive }}" -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.appimage }}
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.archive }}
+            ${{ matrix.appimage }}

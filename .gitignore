@@ -1,0 +1,13 @@
+/target/
+/dist/
+*.AppDir/
+*.AppImage
+appimagetool
+*.tar.gz
+*.zip
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.env

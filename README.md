@@ -2,7 +2,7 @@
 
 A lightweight, pure-Rust SIP phone with a **Tokyo Night** [Slint](https://slint.dev/) UI, built-in NAT traversal, optional SIP registration, pure-Rust audio codecs, and keyboard-to-DTMF.
 
-![Her Dialer](docs/dialer.png)
+![Her Dialer](docs/dialer-preview.png)
 
 ## Features
 

@@ -37,6 +37,7 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             archive: her-macos-arm64.tar.gz
+            dmg: her-macos-arm64.dmg
             bin: her-sip
           - name: windows-amd64
             os: windows-latest
@@ -133,6 +134,45 @@ jobs:
           chmod +x appimagetool
           APPIMAGE_EXTRACT_AND_RUN=1 ARCH="${{ matrix.appimage_arch }}" ./appimagetool Her.AppDir "${{ matrix.appimage }}"
 
+      - name: Package macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP_DIR="dmg_stage/Her.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "${APP_DIR}/Contents/MacOS/her"
+          chmod +x "${APP_DIR}/Contents/MacOS/her"
+
+          cat > "${APP_DIR}/Contents/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Her</string>
+            <key>CFBundleDisplayName</key>
+            <string>Her</string>
+            <key>CFBundleIdentifier</key>
+            <string>io.github.sigxcpu76.her</string>
+            <key>CFBundleVersion</key>
+            <string>0.1.1</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.1.1</string>
+            <key>CFBundleExecutable</key>
+            <string>her</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSMicrophoneUsageDescription</key>
+            <string>Her needs microphone access for SIP voice calls.</string>
+          </dict>
+          </plist>
+          EOF
+
+          ln -s /Applications dmg_stage/Applications
+          hdiutil create -volname "Her" -srcfolder dmg_stage -ov -format UDZO "${{ matrix.dmg }}"
+
       - name: Package Windows archive
         if: runner.os == 'Windows'
         shell: pwsh
@@ -148,6 +188,7 @@ jobs:
           path: |
             ${{ matrix.archive }}
             ${{ matrix.appimage }}
+            ${{ matrix.dmg }}
 
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -156,3 +197,4 @@ jobs:
           files: |
             ${{ matrix.archive }}
             ${{ matrix.appimage }}
+            ${{ matrix.dmg }}
